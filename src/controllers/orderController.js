@@ -92,7 +92,7 @@ exports.updateStatus = asyncHandler(async (req, res) => {
   order.addTimeline(status, note);
 
   if (status === 'delivered') {
-    // Decrement stock, bump sales counts, award buyer coins (1% of subtotal, min 5).
+    // Decrement stock, bump sales counts, award buyer coins (1% of subtotal, min 5), track referral GMV.
     for (const it of order.items) {
       await Product.updateOne(
         { _id: it.product },
@@ -100,7 +100,23 @@ exports.updateStatus = asyncHandler(async (req, res) => {
       );
     }
     const reward = Math.max(5, Math.floor(order.subtotal * 0.01));
-    await require('../models/User').updateOne({ _id: order.buyer }, { $inc: { coins: reward } });
+    try {
+      const { award } = require('../services/coinsService');
+      await award(order.buyer, reward, 'order_reward', { orderId: order._id });
+    } catch (_) { /* non-fatal */ }
+
+    // Accrue GMV per seller for referral tracking + lifetime 2% cashback.
+    try {
+      const { recordSellerSale } = require('../services/referralService');
+      const bySeller = order.items.reduce((acc, it) => {
+        const k = String(it.seller);
+        acc[k] = (acc[k] || 0) + it.price * it.quantity;
+        return acc;
+      }, {});
+      for (const [sellerId, amount] of Object.entries(bySeller)) {
+        await recordSellerSale(sellerId, amount);
+      }
+    } catch (_) { /* non-fatal */ }
   }
 
   await order.save();

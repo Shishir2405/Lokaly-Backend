@@ -34,6 +34,14 @@ exports.signup = asyncHandler(async (req, res) => {
     referredBy,
   });
 
+  // If a seller signs up with a referral code, create the referral tracking row.
+  if (referredBy && user.role === 'seller') {
+    try {
+      const { registerReferral } = require('../services/referralService');
+      await registerReferral({ referrerId: referredBy, referredSellerId: user._id });
+    } catch (_) { /* non-fatal */ }
+  }
+
   const token = signToken(user);
   res.status(201).json({ token, user: user.toPublic() });
 });

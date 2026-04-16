@@ -11,5 +11,7 @@ router.use('/chat', require('./chatRoutes'));
 router.use('/live', require('./liveRoutes'));
 router.use('/reviews', require('./reviewRoutes'));
 router.use('/trust', require('./trustRoutes'));
+router.use('/coins', require('./coinsRoutes'));
+router.use('/referrals', require('./referralRoutes'));
 
 module.exports = router;
