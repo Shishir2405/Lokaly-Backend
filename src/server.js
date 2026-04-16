@@ -1,12 +1,21 @@
 const http = require('http');
 const app = require('./app');
 const env = require('./config/env');
+const { connectDB } = require('./config/db');
+const logger = require('./utils/logger');
 
 const server = http.createServer(app);
 
-server.listen(env.port, () => {
-  console.log(`[lokaly] API listening on http://localhost:${env.port} (${env.nodeEnv})`);
-});
+(async () => {
+  try {
+    await connectDB();
+  } catch (err) {
+    logger.warn('API starting without MongoDB (will retry on first request).', err.message);
+  }
+  server.listen(env.port, () => {
+    logger.info(`API listening on http://localhost:${env.port} (${env.nodeEnv})`);
+  });
+})();
 
 const shutdown = (signal) => {
   console.log(`[lokaly] ${signal} received, shutting down...`);
