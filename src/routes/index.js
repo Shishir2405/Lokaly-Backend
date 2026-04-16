@@ -13,5 +13,6 @@ router.use('/reviews', require('./reviewRoutes'));
 router.use('/trust', require('./trustRoutes'));
 router.use('/coins', require('./coinsRoutes'));
 router.use('/referrals', require('./referralRoutes'));
+router.use('/ml', require('./mlRoutes'));
 
 module.exports = router;
