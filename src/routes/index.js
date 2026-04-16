@@ -6,5 +6,6 @@ router.use('/upload', require('./uploadRoutes'));
 router.use('/posts', require('./postRoutes'));
 router.use('/cart', require('./cartRoutes'));
 router.use('/orders', require('./orderRoutes'));
+router.use('/payments', require('./paymentRoutes'));
 
 module.exports = router;
