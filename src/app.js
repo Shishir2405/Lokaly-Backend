@@ -39,6 +39,8 @@ app.get('/', (_req, res) => {
   });
 });
 
+app.use('/api', require('./routes'));
+
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 app.use(notFound);
 app.use(errorHandler);
