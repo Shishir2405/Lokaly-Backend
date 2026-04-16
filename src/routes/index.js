@@ -9,5 +9,7 @@ router.use('/orders', require('./orderRoutes'));
 router.use('/payments', require('./paymentRoutes'));
 router.use('/chat', require('./chatRoutes'));
 router.use('/live', require('./liveRoutes'));
+router.use('/reviews', require('./reviewRoutes'));
+router.use('/trust', require('./trustRoutes'));
 
 module.exports = router;
