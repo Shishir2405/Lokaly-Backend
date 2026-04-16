@@ -40,6 +40,33 @@ exports.embed = asyncHandler(async (req, res) => {
   res.json({ dim: vec.length, vector: vec });
 });
 
+exports.search = asyncHandler(async (req, res) => {
+  const query = (req.body?.query || req.query.query || '').trim();
+  if (!query) throw ApiError.badRequest('query required');
+  const topK = Math.min(30, parseInt(req.body?.topK || req.query.topK || 12, 10));
+  const category = req.body?.category || req.query.category;
+  const { semanticSearch } = require('../services/searchService');
+  const results = await semanticSearch(query, { topK, category });
+  res.json({
+    query,
+    hits: results.map(({ product, score }) => ({
+      score,
+      product: {
+        _id: product._id, title: product.title, price: product.price,
+        images: product.images, slug: product.slug, seller: product.seller,
+        rating: product.rating, reviewCount: product.reviewCount, category: product.category,
+      },
+    })),
+  });
+});
+
+exports.reindex = asyncHandler(async (req, res) => {
+  if (req.user.role !== 'admin') throw ApiError.forbidden();
+  const { reindexAll } = require('../services/searchService');
+  const count = await reindexAll();
+  res.json({ ok: true, indexed: count });
+});
+
 exports.health = asyncHandler(async (_req, res) => {
   // Kick off model loads in the background so subsequent calls are fast.
   const { loadSentiment, loadEmbed } = require('../ml/pipelines');
