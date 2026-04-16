@@ -7,5 +7,6 @@ router.use('/posts', require('./postRoutes'));
 router.use('/cart', require('./cartRoutes'));
 router.use('/orders', require('./orderRoutes'));
 router.use('/payments', require('./paymentRoutes'));
+router.use('/chat', require('./chatRoutes'));
 
 module.exports = router;
