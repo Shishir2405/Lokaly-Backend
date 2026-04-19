@@ -15,6 +15,7 @@ const messageSchema = new mongoose.Schema({
     flagged: { type: Boolean, default: false },
     label: String,
     score: Number,
+    error: { type: Boolean, default: false },
   },
   // Smart FAQ: suggested canned reply from seller's past answers (T18)
   faqSuggestion: String,

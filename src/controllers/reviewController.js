@@ -1,9 +1,11 @@
 const Review = require('../models/Review');
 const Product = require('../models/Product');
 const Order = require('../models/Order');
+const CoinLedger = require('../models/CoinLedger');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { computeSellerTrust } = require('../services/trustService');
+const { award } = require('../services/coinsService');
 
 async function recomputeProductRating(productId) {
   const agg = await Review.aggregate([
@@ -65,6 +67,22 @@ exports.create = asyncHandler(async (req, res) => {
 
   await recomputeProductRating(prod._id);
   computeSellerTrust(prod.seller).catch(() => null); // fire-and-forget
+
+  // Award 10 coins for this review — capped to 1 reward per (user, product).
+  // Dedup key is `meta.productId` per spec.
+  try {
+    const already = await CoinLedger.findOne({
+      user: req.user._id,
+      reason: 'review',
+      'meta.productId': String(prod._id),
+    }).lean();
+    if (!already) {
+      await award(req.user._id, 10, 'review', {
+        productId: String(prod._id),
+        reviewId: String(review._id),
+      });
+    }
+  } catch (_) { /* non-fatal */ }
 
   res.status(201).json({ review });
 });

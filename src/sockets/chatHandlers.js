@@ -24,13 +24,24 @@ module.exports = function chatHandlers(io, socket) {
 
       const toUser = convo.participants.find((p) => String(p) !== socket.userId);
 
-      let moderation = { flagged: false };
+      // Best-effort moderation — persist the message even if the service fails, but mark
+      // it UNKNOWN+flagged so the recipient sees a warning. Flagged messages are still
+      // delivered; we emit an additional `chat:flagged` event to the recipient.
+      let moderation = { flagged: false, label: 'NEUTRAL', score: 0 };
       let faqSuggestion = null;
-      try {
-        const { moderateText, suggestFaqReply } = require('../services/moderationService');
-        if (text) moderation = await moderateText(text);
-        if (text) faqSuggestion = await suggestFaqReply({ fromUser: socket.userId, toUser, text });
-      } catch (_) { /* optional */ }
+      if (text) {
+        try {
+          const { moderateText, suggestFaqReply } = require('../services/moderationService');
+          moderation = await moderateText(text);
+          try {
+            faqSuggestion = await suggestFaqReply({ fromUser: socket.userId, toUser, text });
+          } catch (_) { /* non-fatal */ }
+        } catch (err) {
+          moderation = { flagged: true, label: 'UNKNOWN', score: 0 };
+          // eslint-disable-next-line no-console
+          console.error('[chat-socket] moderation failed:', err.message);
+        }
+      }
 
       const msg = await Message.create({
         conversation: convo._id,
@@ -54,8 +65,16 @@ module.exports = function chatHandlers(io, socket) {
         from: socket.userId,
         preview: (text || '[attachment]').slice(0, 140),
       });
+      if (moderation.flagged) {
+        io.to(`user:${toUser}`).emit('chat:flagged', {
+          messageId: msg._id,
+          conversationId,
+          from: socket.userId,
+          label: moderation.label || 'UNKNOWN',
+        });
+      }
 
-      ack?.({ ok: true, message: msg });
+      ack?.({ ok: true, message: msg, moderation });
     } catch (err) {
       ack?.({ error: err.message });
     }

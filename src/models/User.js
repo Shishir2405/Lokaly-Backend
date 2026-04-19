@@ -4,9 +4,11 @@ const bcrypt = require('bcryptjs');
 const ROLES = ['buyer', 'seller', 'admin'];
 
 const locationSchema = new mongoose.Schema({
+  street: { type: String, trim: true },
   city: { type: String, trim: true },
   state: { type: String, trim: true },
   pincode: { type: String, trim: true },
+  country: { type: String, trim: true },
   geo: {
     type: { type: String, enum: ['Point'], default: 'Point' },
     coordinates: { type: [Number], default: [0, 0] },
@@ -31,6 +33,11 @@ const userSchema = new mongoose.Schema({
   shopCategory: { type: String, trim: true },
   isVerifiedSeller: { type: Boolean, default: false },
 
+  // Email verification (task 3 — names per spec; legacy aliases kept for back-compat)
+  isEmailVerified: { type: Boolean, default: false, alias: 'emailVerified' },
+  emailVerificationToken: { type: String, default: null, select: false, alias: 'emailVerifyToken' },
+  emailVerificationExpiresAt: { type: Date, default: null, select: false, alias: 'emailVerifyExpires' },
+
   // Karma / Trust
   trustScore: { type: Number, default: 50, min: 0, max: 100 },
   fraudKarma: { type: Number, default: 50, min: 0, max: 100 },
@@ -54,6 +61,13 @@ userSchema.pre('save', async function preSave(next) {
   if (!this.referralCode) {
     this.referralCode = `LKY-${this._id.toString().slice(-6).toUpperCase()}`;
   }
+  // Only auto-demote once profile drops below bar; never auto-promote here
+  // (maybeAutoVerifySeller is the canonical promotion path — called after trust recompute).
+  if (this.role === 'seller' && this.isVerifiedSeller) {
+    if (!this.isEmailVerified || (Number(this.trustScore) || 0) <= 60) {
+      this.isVerifiedSeller = false;
+    }
+  }
   next();
 });
 
@@ -62,9 +76,13 @@ userSchema.methods.verifyPassword = function verifyPassword(plain) {
 };
 
 userSchema.methods.toPublic = function toPublic() {
-  const obj = this.toObject({ virtuals: false });
+  const obj = this.toObject({ virtuals: true });
   delete obj.passwordHash;
   delete obj.__v;
+  delete obj.emailVerificationToken;
+  delete obj.emailVerifyToken;
+  delete obj.emailVerificationExpiresAt;
+  delete obj.emailVerifyExpires;
   return obj;
 };
 

@@ -16,5 +16,7 @@ router.use('/referrals', require('./referralRoutes'));
 router.use('/ml', require('./mlRoutes'));
 router.use('/stress', require('./stressRoutes'));
 router.use('/faq', require('./faqRoutes'));
+router.use('/leaderboard', require('./leaderboardRoutes'));
+router.use('/users', require('./userRoutes'));
 
 module.exports = router;

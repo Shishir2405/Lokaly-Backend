@@ -59,6 +59,9 @@ async function computeSellerTrust(sellerId) {
   user.trustScore = Math.max(0, Math.min(100, trustScore));
   await user.save();
 
+  // After trust recompute, promote to verified seller if criteria met.
+  await maybeAutoVerifySeller(user);
+
   return {
     trustScore: user.trustScore,
     breakdown: {
@@ -68,4 +71,18 @@ async function computeSellerTrust(sellerId) {
   };
 }
 
-module.exports = { computeSellerTrust };
+/**
+ * Promote a seller to isVerifiedSeller=true if emailVerified AND trustScore > 60.
+ * Safe to call repeatedly; never demotes — User pre-save hook handles demotion.
+ */
+async function maybeAutoVerifySeller(user) {
+  if (!user || user.role !== 'seller') return false;
+  if (user.isVerifiedSeller) return false;
+  if (!user.isEmailVerified) return false;
+  if ((Number(user.trustScore) || 0) <= 60) return false;
+  user.isVerifiedSeller = true;
+  await user.save();
+  return true;
+}
+
+module.exports = { computeSellerTrust, maybeAutoVerifySeller };

@@ -91,9 +91,47 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
 });
 
 exports.webhook = asyncHandler(async (req, res) => {
-  // Razorpay webhook handler stub — wire HMAC validation with RAZORPAY_WEBHOOK_SECRET when deploying.
+  const signature = req.headers['x-razorpay-signature'];
+  const secret = env.razorpay.webhookSecret;
+
+  // Require a configured secret + signed header before doing any work.
+  if (!secret) {
+    // eslint-disable-next-line no-console
+    console.error('[razorpay webhook] RAZORPAY_WEBHOOK_SECRET not configured');
+    return res.status(400).json({ error: 'webhook not configured' });
+  }
+  if (!signature) {
+    return res.status(400).json({ error: 'missing signature' });
+  }
+
+  // HMAC over the exact bytes Razorpay signed. app.js captures req.rawBody via
+  // the express.json `verify` hook; fall back to a canonical stringify only as
+  // a last resort (never reaches prod if raw body is captured).
+  const bodyStr = typeof req.rawBody === 'string' && req.rawBody.length
+    ? req.rawBody
+    : JSON.stringify(req.body || {});
+
+  let valid = false;
+  try {
+    const expected = crypto.createHmac('sha256', secret).update(bodyStr).digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(signature));
+    valid = a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch (_) {
+    valid = false;
+  }
+
+  if (!valid) {
+    return res.status(400).json({ error: 'invalid signature' });
+  }
+
   const event = req.body?.event;
   const payload = req.body?.payload;
-  console.log('[razorpay webhook]', event, payload?.payment?.entity?.id);
+  // eslint-disable-next-line no-console
+  console.log('[razorpay webhook]', {
+    event,
+    paymentId: payload?.payment?.entity?.id,
+  });
+
   res.json({ received: true });
 });

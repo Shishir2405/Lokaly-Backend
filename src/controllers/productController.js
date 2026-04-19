@@ -50,11 +50,34 @@ exports.getById = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  if (req.user.role !== 'seller') throw ApiError.forbidden('Only sellers can create products');
-  const payload = { ...req.body, seller: req.user._id };
+  if (req.user.role !== 'seller' && req.user.role !== 'admin') {
+    throw ApiError.forbidden('Only sellers can create products');
+  }
+  const body = req.body || {};
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  if (!title || title.length < 3) throw ApiError.badRequest('title must be at least 3 characters');
+  const price = Number(body.price);
+  if (!Number.isFinite(price) || price <= 0) throw ApiError.badRequest('price must be > 0');
+  const stock = body.stock === undefined ? 0 : Number(body.stock);
+  if (!Number.isFinite(stock) || stock < 0) throw ApiError.badRequest('stock must be >= 0');
+  const category = typeof body.category === 'string' ? body.category.trim() : '';
+  if (!category) throw ApiError.badRequest('category is required');
+  const images = Array.isArray(body.images)
+    ? body.images.filter((i) => i && (i.url || typeof i === 'string'))
+    : [];
+  if (images.length < 1) throw ApiError.badRequest('at least 1 image required');
+
+  const payload = { ...body, title, price, stock, category, images, seller: req.user._id };
+  delete payload._id;
   const product = await Product.create(payload);
   res.status(201).json({ product });
 });
+
+const UPDATABLE_PRODUCT_FIELDS = [
+  'title', 'description', 'category', 'tags',
+  'price', 'compareAtPrice', 'stock',
+  'images', 'videos', 'attributes', 'isActive',
+];
 
 exports.update = asyncHandler(async (req, res) => {
   const product = await Product.findById(req.params.id);
@@ -62,7 +85,29 @@ exports.update = asyncHandler(async (req, res) => {
   if (String(product.seller) !== String(req.user._id) && req.user.role !== 'admin') {
     throw ApiError.forbidden('Not your product');
   }
-  Object.assign(product, req.body);
+  const body = req.body || {};
+  // Explicitly reject attempts to rewrite ownership / identity fields.
+  if ('seller' in body) throw ApiError.badRequest('`seller` cannot be changed');
+  if ('_id' in body) throw ApiError.badRequest('`_id` cannot be changed');
+  for (const key of UPDATABLE_PRODUCT_FIELDS) {
+    if (key in body) product[key] = body[key];
+  }
+  // Validate after whitelist assignment.
+  if ('price' in body) {
+    const price = Number(body.price);
+    if (!Number.isFinite(price) || price <= 0) throw ApiError.badRequest('price must be > 0');
+    product.price = price;
+  }
+  if ('stock' in body) {
+    const stock = Number(body.stock);
+    if (!Number.isFinite(stock) || stock < 0) throw ApiError.badRequest('stock must be >= 0');
+    product.stock = stock;
+  }
+  if ('title' in body) {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) throw ApiError.badRequest('title cannot be empty');
+    product.title = title;
+  }
   await product.save();
   res.json({ product });
 });

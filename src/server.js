@@ -17,6 +17,14 @@ attachSockets(server, app);
   server.listen(env.port, () => {
     logger.info(`API listening on http://localhost:${env.port} (${env.nodeEnv})`);
   });
+
+  // Recurring coin-expiry sweep — first run ~15s after boot, then every 24h.
+  try {
+    const { startCoinExpiryJob } = require('./services/coinsService');
+    startCoinExpiryJob();
+  } catch (err) {
+    logger.warn('coin expiry job failed to start:', err.message);
+  }
 })();
 
 const shutdown = (signal) => {

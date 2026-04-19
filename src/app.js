@@ -10,7 +10,14 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: env.clientUrl, credentials: true }));
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({
+  limit: '2mb',
+  // Capture the raw body so webhook HMAC verification (e.g. Razorpay) can hash
+  // the exact bytes the provider signed, not a re-serialised JSON.
+  verify: (req, _res, buf) => {
+    if (buf && buf.length) req.rawBody = buf.toString('utf8');
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
 if (!env.isProd) app.use(morgan('dev'));
 

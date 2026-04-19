@@ -29,4 +29,10 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { requireAuth, requireRole };
+function requireAdmin(req, _res, next) {
+  if (!req.user) return next(ApiError.unauthorized());
+  if (req.user.role !== 'admin') return next(ApiError.forbidden('Admin only'));
+  next();
+}
+
+module.exports = { requireAuth, requireRole, requireAdmin };

@@ -16,7 +16,6 @@ exports.createFromCart = asyncHandler(async (req, res) => {
   for (const it of cart.items) {
     const p = it.product;
     if (!p || !p.isActive) throw ApiError.badRequest(`Product unavailable`);
-    if (p.stock < it.quantity) throw ApiError.badRequest(`Insufficient stock: ${p.title}`);
     const price = p.price;
     subtotal += price * it.quantity;
     items.push({
@@ -29,6 +28,24 @@ exports.createFromCart = asyncHandler(async (req, res) => {
     });
   }
 
+  // Atomically decrement stock using a stock >= qty pre-check. If any item fails,
+  // rollback prior decrements and return 409.
+  const decremented = [];
+  for (const it of items) {
+    const r = await Product.updateOne(
+      { _id: it.product, isActive: true, stock: { $gte: it.quantity } },
+      { $inc: { stock: -it.quantity } }
+    );
+    if (r.modifiedCount !== 1) {
+      // Rollback previously decremented items.
+      for (const d of decremented) {
+        await Product.updateOne({ _id: d.product }, { $inc: { stock: d.quantity } });
+      }
+      throw new ApiError(409, `Out of stock: ${it.title}`);
+    }
+    decremented.push(it);
+  }
+
   const usableCoins = Math.min(
     parseInt(coinsToRedeem, 10) || 0,
     req.user.coins || 0,
@@ -37,16 +54,25 @@ exports.createFromCart = asyncHandler(async (req, res) => {
   const shipping = subtotal > 999 ? 0 : 49;
   const total = subtotal + shipping - usableCoins;
 
-  const order = await Order.create({
-    buyer: req.user._id,
-    items,
-    address,
-    subtotal,
-    shipping,
-    coinsRedeemed: usableCoins,
-    total,
-    timeline: [{ status: 'pending', note: 'Order created, awaiting payment' }],
-  });
+  let order;
+  try {
+    order = await Order.create({
+      buyer: req.user._id,
+      items,
+      address,
+      subtotal,
+      shipping,
+      coinsRedeemed: usableCoins,
+      total,
+      timeline: [{ status: 'pending', note: 'Order created, awaiting payment' }],
+    });
+  } catch (err) {
+    // Order persist failed — undo stock decrements.
+    for (const d of decremented) {
+      await Product.updateOne({ _id: d.product }, { $inc: { stock: d.quantity } });
+    }
+    throw err;
+  }
 
   if (usableCoins > 0) {
     req.user.coins -= usableCoins;
@@ -87,16 +113,34 @@ exports.updateStatus = asyncHandler(async (req, res) => {
   const order = await Order.findById(req.params.id);
   if (!order) throw ApiError.notFound('Order not found');
   const isSeller = order.items.some((i) => String(i.seller) === String(req.user._id));
-  if (!isSeller && req.user.role !== 'admin') throw ApiError.forbidden();
+  const isBuyer = String(order.buyer) === String(req.user._id);
+  if (!isSeller && !isBuyer && req.user.role !== 'admin') throw ApiError.forbidden();
 
+  const prevStatus = order.status;
   order.addTimeline(status, note);
 
+  // On cancel / refund — restore the stock that was reserved at creation-time.
+  if ((status === 'cancelled' || status === 'refunded') &&
+      prevStatus !== 'cancelled' && prevStatus !== 'refunded') {
+    for (const it of order.items) {
+      await Product.updateOne({ _id: it.product }, { $inc: { stock: it.quantity } });
+    }
+    if (order.coinsRedeemed && order.coinsRedeemed > 0) {
+      try {
+        const { award } = require('../services/coinsService');
+        await award(order.buyer, order.coinsRedeemed, 'admin_adjust', {
+          orderId: order._id, reason: 'refund-redeemed-coins',
+        });
+      } catch (_) { /* non-fatal */ }
+    }
+  }
+
   if (status === 'delivered') {
-    // Decrement stock, bump sales counts, award buyer coins (1% of subtotal, min 5), track referral GMV.
+    // Stock was already decremented at order creation; only bump sales counts here.
     for (const it of order.items) {
       await Product.updateOne(
         { _id: it.product },
-        { $inc: { stock: -it.quantity, salesCount: it.quantity } }
+        { $inc: { salesCount: it.quantity } }
       );
     }
     const reward = Math.max(5, Math.floor(order.subtotal * 0.01));

@@ -58,13 +58,22 @@ exports.send = asyncHandler(async (req, res) => {
 
   const toUser = convo.participants.find((p) => String(p) !== String(req.user._id));
 
-  let moderation = { flagged: false };
+  // Moderation is best-effort. If the sentiment/moderation service throws we still
+  // persist the message but mark it UNKNOWN so downstream UI can surface a warning.
+  let moderation = { flagged: false, label: 'NEUTRAL', score: 0 };
   let faqSuggestion = null;
-  try {
-    const { moderateText, suggestFaqReply } = require('../services/moderationService');
-    if (text) moderation = await moderateText(text);
-    if (text) faqSuggestion = await suggestFaqReply({ fromUser: req.user._id, toUser, text });
-  } catch (_) { /* optional until T15/T18 land */ }
+  if (text) {
+    try {
+      const { moderateText, suggestFaqReply } = require('../services/moderationService');
+      moderation = await moderateText(text);
+      try { faqSuggestion = await suggestFaqReply({ fromUser: req.user._id, toUser, text }); }
+      catch (_) { /* non-fatal */ }
+    } catch (err) {
+      moderation = { flagged: true, label: 'UNKNOWN', score: 0 };
+      // eslint-disable-next-line no-console
+      console.error('[chat] moderation failed:', err.message);
+    }
+  }
 
   const msg = await Message.create({
     conversation: convo._id,
@@ -83,7 +92,16 @@ exports.send = asyncHandler(async (req, res) => {
   await convo.save();
 
   // Socket emit is handled by the sockets layer (T11); this REST path is kept for fallbacks.
-  req.app.get('io')?.to(`user:${toUser}`).emit('chat:message', msg);
+  const io = req.app.get('io');
+  io?.to(`user:${toUser}`).emit('chat:message', msg);
+  if (moderation && moderation.flagged) {
+    io?.to(`user:${toUser}`).emit('chat:flagged', {
+      messageId: msg._id,
+      conversationId: convo._id,
+      from: req.user._id,
+      label: moderation.label || 'UNKNOWN',
+    });
+  }
 
   res.status(201).json({ message: msg });
 });
